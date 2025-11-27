@@ -1,0 +1,82 @@
+/* ===== Neumorphism UI ===== */
+
+body {
+    margin: 0;
+    padding: 0;
+    background: #e0e5ec;
+    font-family: "Segoe UI", sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+}
+
+.container {
+    width: 360px;
+    padding: 30px;
+    border-radius: 20px;
+    background: #e0e5ec;
+    box-shadow:
+        7px 7px 14px #bec3c9,
+        -7px -7px 14px #ffffff;
+    text-align: center;
+}
+
+h2 {
+    margin-top: 0;
+    color: #4a4a4a;
+}
+
+input {
+    width: 100%;
+    padding: 12px;
+    margin-top: 15px;
+    border: none;
+    outline: none;
+    font-size: 16px;
+    border-radius: 12px;
+    background: #e0e5ec;
+    box-shadow:
+        inset 5px 5px 10px #bec3c9,
+        inset -5px -5px 10px #ffffff;
+}
+
+button {
+    width: 100%;
+    padding: 13px;
+    margin-top: 22px;
+    border: none;
+    border-radius: 12px;
+    background: #e0e5ec;
+    color: #4a4a4a;
+    cursor: pointer;
+    font-size: 17px;
+    font-weight: 600;
+
+    box-shadow:
+        6px 6px 12px #b7bbc0,
+        -6px -6px 12px #ffffff;
+    transition: 0.2s ease-in-out;
+}
+
+button:active {
+    box-shadow: 
+        inset 5px 5px 10px #b7bbc0,
+        inset -5px -5px 10px #ffffff;
+}
+
+.video-box {
+    margin-top: 15px;
+    padding: 10px;
+    border-radius: 15px;
+    background: #e0e5ec;
+    box-shadow:
+        inset 5px 5px 10px #bec3c9,
+        inset -5px -5px 10px #ffffff;
+}
+
+.msg {
+    margin-top: 15px;
+    color: #555;
+    font-weight: bold;
+}
