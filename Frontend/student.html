@@ -2,24 +2,44 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <title>Sinh viên</title>
-    <link rel="stylesheet" href="/static/style.css">
-    <script src="/static/app.js" defer></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Panel</title>
+
+    <!-- File CSS giao diện chung -->
+    <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
 
-<div class="container">
-    <h2>Điểm danh</h2>
+    <div class="center-box">
+        <h2>Điểm danh khuôn mặt</h2>
 
-    <video id="video" autoplay playsinline></video>
+        <!-- Nút logout, gọi hàm logout() trong app.js -->
+        <button onclick="logout()" class="btn-danger">Đăng xuất</button>
 
-    <button onclick="capture()">Điểm danh</button>
+        <!-- Dòng watermark sẽ hiển thị username hiện tại -->
+        <div id="watermark" 
+             style="font-size: 22px; 
+                    font-weight: bold; 
+                    margin: 10px 0; 
+                    color: red; 
+                    text-align: center;">
+        </div>
 
-    <p id="msg"></p>
+        <!-- Video hiển thị camera -->
+        <video id="video" autoplay></video>
 
-    <button onclick="logout()" class="logout">Đăng xuất</button>
-</div>
+        <!-- Nút bấm để chụp ảnh và gửi lên API điểm danh -->
+        <button onclick="captureAttendance()" class="btn">Chụp điểm danh</button>
 
+        <!-- Canvas dùng để chụp frame từ video (ẩn đi) -->
+        <canvas id="canvas" style="display:none;"></canvas>
+
+        <!-- Chỗ hiển thị thông báo thành công/thất bại -->
+        <p id="msg" class="msg"></p>
+    </div>
+
+    <!-- File JavaScript điều khiển logic -->
+    <script src="app.js"></script>
 </body>
 </html>
