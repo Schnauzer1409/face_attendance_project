@@ -2,23 +2,118 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <title>Đăng nhập</title>
-    <link rel="stylesheet" href="/static/style.css">
-    <script src="/static/app.js" defer></script>
+    <title>Login</title>
+
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <style>
+        /* CSS cho bố cục trang login */
+        body {
+            font-family: Arial;
+            background: #eef2f3;        /* Màu nền nhạt */
+            display: flex;              /* Căn giữa nội dung theo chiều ngang + dọc */
+            justify-content: center;
+            align-items: center;
+            height: 100vh;              /* Chiều cao toàn màn hình */
+        }
+
+        /* Khung chứa form */
+        .box {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;        /* Bo góc mềm mại */
+            width: 350px;
+            box-shadow: 0 0 10px #ccc;  /* Đổ bóng nhẹ */
+        }
+
+        /* Style cho input */
+        input {
+            width: 100%;
+            padding: 10px;
+            margin-top: 10px;
+            border: 1px solid #bbb;
+            border-radius: 5px;
+        }
+
+        /* Style cho nút đăng nhập */
+        button {
+            width: 100%;
+            padding: 10px;
+            margin-top: 15px;
+            background: #4285F4;       /* Màu xanh kiểu Google */
+            border: none;
+            border-radius: 5px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        /* Style hiển thị lỗi */
+        .error {
+            color: red;
+            margin-top: 10px;
+            text-align: center;
+        }
+    </style>
 </head>
 
 <body>
-<div class="container">
-    <h2>Đăng nhập</h2>
 
+<div class="box">
+    <h2 style="text-align:center;">Đăng nhập</h2>
+
+    <!-- Input nhập username -->
     <input type="text" id="username" placeholder="Tên đăng nhập">
+
+    <!-- Input nhập password -->
     <input type="password" id="password" placeholder="Mật khẩu">
 
+    <!-- Nút bấm login gọi hàm JavaScript -->
     <button onclick="login()">Đăng nhập</button>
 
-    <p id="error" class="msg"></p>
+    <!-- Chỗ hiển thị lỗi -->
+    <div class="error" id="error"></div>
 </div>
+
+<script>
+/* Hàm login() gửi yêu cầu POST lên /api/login */
+async function login() {
+
+    // Tạo form gửi kèm dữ liệu username + password
+    let form = new FormData();
+    form.append("username", document.getElementById("username").value);
+    form.append("password", document.getElementById("password").value);
+
+    // Gửi request POST lên backend
+    let res = await fetch("/api/login", {
+        method: "POST",
+        body: form
+    });
+
+    // Nhận JSON trả về
+    let data = await res.json();
+
+    // Nếu status != ok thì báo lỗi
+    if (data.status !== "ok") {
+        document.getElementById("error").innerText = data.msg;
+        return;
+    }
+
+    /* Nếu đăng nhập thành công */
+
+    // Lưu token + username + role để dùng ở các trang khác
+    localStorage.setItem("token", data.token);
+    localStorage.setItem("username", data.username);
+    localStorage.setItem("role", data.role);
+
+    // Chuyển trang theo quyền user
+    if (data.role === "teacher") {
+        window.location.href = "/static/teacher.html";
+    } else {
+        window.location.href = "/static/student.html";
+    }
+}
+</script>
 
 </body>
 </html>
-
