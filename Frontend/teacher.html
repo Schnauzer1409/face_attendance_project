@@ -2,23 +2,136 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <title>Giáo viên</title>
-    <link rel="stylesheet" href="/static/style.css">
-    <script src="/static/app.js" defer></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teacher Panel</title>
+
+    <link rel="stylesheet" href="style.css">
+
+    <style>
+        .tab-container {
+            display: flex;
+            margin-bottom: 20px;
+            gap: 10px;
+        }
+
+        .tab-btn {
+            padding: 10px 20px;
+            border: none;
+            cursor: pointer;
+            background: #ddd;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+
+        .tab-btn.active {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        video {
+            width: 100%;
+            max-width: 320px;
+            border-radius: 10px;
+            border: 2px solid #ccc;
+            margin: 10px 0;
+        }
+    </style>
 </head>
 
+
 <body>
-
-<div class="container">
-    <h2>Trang giáo viên</h2>
-
-    <input type="file" id="photo">
-    <button onclick="enroll()">Lưu khuôn mặt</button>
-
-    <p id="msg"></p>
-
-    <button onclick="logout()" class="logout">Đăng xuất</button>
+    <div id="cameraGate"
+     onclick="enableCamera()"
+     style="
+        position:fixed;
+        inset:0;
+        background:#000;
+        color:white;
+        display:none;
+        align-items:center;
+        justify-content:center;
+        z-index:9999;
+        font-size:20px;
+        text-align:center;
+     ">
+    👆 Chạm vào màn hình để bật camera
 </div>
+
+<div class="center-box">
+    <h2>Trang giáo viên</h2>
+    <button onclick="logout()" class="btn-danger">Đăng xuất</button>
+
+    <div class="tab-container">
+        <button class="tab-btn active" onclick="showTab(event,'enroll')">Enroll Sinh Viên</button>
+        <button class="tab-btn" onclick="showTab(event,'watermark')">Watermark</button>
+    </div>
+
+    <!-- ENROLL -->
+    <div id="tab-enroll" class="tab-content active">
+        <h3>Thêm ảnh mẫu (Enroll)</h3>
+        <input type="text" id="studentId" placeholder="Nhập MSSV">
+
+        <video id="videoEnroll" autoplay muted playsinline></video>
+        <canvas id="canvas" style="display:none;"></canvas>
+
+        <button onclick="captureEnroll()" class="btn">
+            Chụp ảnh & Enroll
+        </button>
+
+        <p id="msg" class="msg"></p>
+    </div>
+
+    <!-- WATERMARK -->
+    <div id="tab-watermark" class="tab-content">
+        <h3>Watermark</h3>
+
+       <video id="videoWM" autoplay muted playsinline></video>
+
+        <button onclick="captureWatermark()" class="btn">
+            Chụp ảnh watermark
+        </button>
+
+        <input type="file" id="wmInput" accept="image/*">
+        <button onclick="captureWatermarkFromCamera()" class="btn">
+            Upload watermark
+        </button>
+
+        <p id="wmMsg" class="msg"></p>
+        <button id="btnSetWM"
+        onclick="setWatermark()"
+        class="btn"
+        style="display:none; margin-top:10px;">
+    ✅ Set watermark
+</button>
+    </div>
+
+    <button onclick="clearEncodings()" class="btn-warning" style="margin-top: 30px;">
+        Xóa dữ liệu nhận diện
+    </button>
+</div>
+
+<script src="app.js"></script>
+
+<script>
+    function showTab(event, tabName) {
+        document.querySelectorAll(".tab-content").forEach(el =>
+            el.classList.remove("active")
+        );
+        document.querySelectorAll(".tab-btn").forEach(el =>
+            el.classList.remove("active")
+        );
+        document.getElementById("tab-" + tabName).classList.add("active");
+        event.target.classList.add("active");
+    }
+</script>
 
 </body>
 </html>
