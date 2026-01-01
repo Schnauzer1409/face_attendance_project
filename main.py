@@ -1,180 +1,402 @@
-from fastapi import FastAPI, UploadFile, Form
+# ===============================
+# IMPORT THƯ VIỆN
+# ===============================
+from watermark_feature import train_watermark, verify_watermark
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+
+from pathlib import Path
 import sqlite3
-import secrets
-import os
-import cv2
-from insightface.app import FaceAnalysis
+import base64
+import io
+import time
+import pickle
+
 import numpy as np
+from PIL import Image
+
+from insightface.app import FaceAnalysis
 
 
+# ===============================
+# KHAI BÁO THƯ MỤC
+# ===============================
+BASE_DIR = Path(__file__).resolve().parent
+
+SAVE_DIR = BASE_DIR / "uploads"
+ENROLL_DIR = SAVE_DIR / "enroll"        # ảnh đăng ký khuôn mặt
+ATT_DIR = SAVE_DIR / "attendance"       # ảnh điểm danh
+WM_DIR = BASE_DIR / "watermarks"        # ảnh watermark phòng
+
+SAVE_DIR.mkdir(exist_ok=True)
+ENROLL_DIR.mkdir(exist_ok=True)
+ATT_DIR.mkdir(exist_ok=True)
+WM_DIR.mkdir(exist_ok=True)
+
+
+# ===============================
+# KHỞI TẠO FASTAPI
+# ===============================
 app = FastAPI()
 
-# ============================
-# STATIC FILES (Frontend)
-# ============================
-# Trỏ tới thư mục Frontend
-app.mount("/static", StaticFiles(directory="Frontend"), name="static")
+FRONTEND_DIR = BASE_DIR.parent / "Frontend"
+
+# Cho phép load HTML / CSS / JS
+app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
 
-# ============================
-# CORS
-# ============================
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# ===============================
+# ROUTE GIAO DIỆN
+# ===============================
+@app.get("/")
+def home():
+    return FileResponse(FRONTEND_DIR / "index.html")
+
+@app.get("/teacher")
+def teacher_page():
+    return FileResponse(FRONTEND_DIR / "teacher.html")
+
+@app.get("/student")
+def student_page():
+    return FileResponse(FRONTEND_DIR / "student.html")
 
 
-# ============================
-# DATABASE INIT
-# ============================
-def init_db():
-    conn = sqlite3.connect("attendance.db")
-    c = conn.cursor()
+# ===============================
+# DATABASE SQLITE
+# ===============================
+DB_PATH = BASE_DIR / "attendance.db"
 
-    # user data
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            username TEXT PRIMARY KEY,
-            password TEXT,
-            role TEXT,
-            face BLOB
-        )
-    """)
+def get_conn():
+    return sqlite3.connect(DB_PATH, check_same_thread=False)
 
-    # attendance logs
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT,
-            time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
+def sql(query, params=()):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(query, params)
     conn.commit()
+    rows = cur.fetchall()
     conn.close()
+    return rows
 
 
-init_db()
+# Bảng user
+sql("""
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE,
+    password TEXT,
+    role TEXT,
+    token TEXT
+)
+""")
+
+# Bảng lưu embedding khuôn mặt
+sql("""
+CREATE TABLE IF NOT EXISTS encodings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT,
+    embedding BLOB
+)
+""")
 
 
-# ============================
-# FACE RECOGNITION
-# ============================
+# ===============================
+# TẠO USER MẪU
+# ===============================
+def add_default_users():
+    users = sql("SELECT username FROM users")
+    existed = {u[0] for u in users}
+
+    if "teacher1" not in existed:
+        sql(
+            "INSERT INTO users(username,password,role) VALUES (?,?,?)",
+            ("teacher1", "123456", "teacher")
+        )
+
+    if "student1" not in existed:
+        sql(
+            "INSERT INTO users(username,password,role) VALUES (?,?,?)",
+            ("student1", "123456", "student")
+        )
+
+add_default_users()
+
+
+# ===============================
+# LOAD MODEL NHẬN DIỆN
+# ===============================
 face_app = FaceAnalysis(name="buffalo_l")
 face_app.prepare(ctx_id=0, det_size=(640, 640))
 
 
-def extract_face_embedding(image_bytes):
-    img = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
-    faces = face_app.get(img)
+# ===============================
+# HÀM TIỆN ÍCH
+# ===============================
+# Chuyển base64 → numpy image
+def decode_base64_to_image(b64):
+    header, data = b64.split(",", 1)
+    img_bytes = base64.b64decode(data)
+    return np.array(Image.open(io.BytesIO(img_bytes)).convert("RGB"))
+
+# Tính độ giống cosine
+def cosine(a, b):
+    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+import cv2
+
+def check_watermark(att_img: np.ndarray, wm_img: np.ndarray, threshold=0.15):
+    """
+    att_img : ảnh điểm danh (RGB)
+    wm_img  : ảnh watermark (RGB)
+    """
+
+    gray1 = cv2.cvtColor(att_img, cv2.COLOR_RGB2GRAY)
+    gray2 = cv2.cvtColor(wm_img, cv2.COLOR_RGB2GRAY)
+
+    orb = cv2.ORB.create(nfeatures=500)
+
+    mask1 = np.ones(gray1.shape, dtype=np.uint8)
+    mask2 = np.ones(gray2.shape, dtype=np.uint8)
+
+    kp1, des1 = orb.detectAndCompute(gray1, mask1)
+    kp2, des2 = orb.detectAndCompute(gray2, mask2)
+
+    if des1 is None or des2 is None:
+        return False
+
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+    matches = bf.match(des1, des2)
+
+    score = len(matches) / max(len(kp2), 1)
+
+    return score > threshold
+
+
+
+# ===============================
+# API LOGIN
+# ===============================
+@app.post("/api/login")
+def login(username: str = Form(...), password: str = Form(...)):
+    user = sql(
+        "SELECT username,password,role FROM users WHERE username=?",
+        (username,)
+    )
+
+    if not user:
+        return {"status": "fail", "msg": "User không tồn tại"}
+
+    db_user, db_pass, role = user[0]
+
+    if password != db_pass:
+        return {"status": "fail", "msg": "Sai mật khẩu"}
+
+    token = f"{username}_{int(time.time())}"
+    sql("UPDATE users SET token=? WHERE username=?", (token, username))
+
+    return {
+        "status": "ok",
+        "username": username,
+        "role": role,
+        "token": token
+    }
+
+
+# ===============================
+# ENROLL KHUÔN MẶT (GIÁO VIÊN)
+# ===============================
+@app.post("/api/enroll")
+def enroll(username: str = Form(...), file: UploadFile = File(...)):
+    img_bytes = file.file.read()
+
+    # Lưu ảnh
+    filename = f"{username}_{int(time.time())}.jpg"
+    with open(ENROLL_DIR / filename, "wb") as f:
+        f.write(img_bytes)
+
+    # Nhận diện mặt
+    img_np = np.array(Image.open(io.BytesIO(img_bytes)).convert("RGB"))
+    faces = face_app.get(img_np)
 
     if len(faces) == 0:
-        return None
+        return {"status": "no_face"}
 
-    return faces[0].embedding.tobytes()
+    # Lấy embedding
+    emb = faces[0].embedding
+    emb_blob = pickle.dumps(emb)
 
+    # Lưu vào DB
+    sql(
+        "INSERT INTO encodings(username,embedding) VALUES (?,?)",
+        (username, emb_blob)
+    )
 
-def compare_face(emb1, emb2):
-    e1 = np.frombuffer(emb1, dtype=np.float32)
-    e2 = np.frombuffer(emb2, dtype=np.float32)
-    similarity = np.dot(e1, e2) / (np.linalg.norm(e1) * np.linalg.norm(e2))
-    return similarity > 0.5
-
-
-# ============================
-# LOGIN
-# ============================
-@app.post("/api/login")
-async def login(username: str = Form(...), password: str = Form(...)):
-    conn = sqlite3.connect("attendance.db")
-    c = conn.cursor()
-
-    c.execute("SELECT password, role FROM users WHERE username=?", (username,))
-    row = c.fetchone()
-    conn.close()
-
-    if row is None or row[0] != password:
-        return JSONResponse({"status": "error", "msg": "Sai tài khoản hoặc mật khẩu"})
-
-    token = secrets.token_hex(16)
-
-    return JSONResponse({
-        "status": "ok",
-        "token": token,
-        "username": username,
-        "role": row[1]
-    })
+    return {"status": "ok", "msg": "Enroll thành công"}
 
 
-# ============================
-# TEACHER: ENROLL
-# ============================
-@app.post("/api/enroll")
-async def enroll(
-    file: UploadFile,
-    token: str = Form(...)
-):
-    img_bytes = await file.read()
-    embedding = extract_face_embedding(img_bytes)
-
-    if embedding is None:
-        return JSONResponse({"status": "error", "msg": "Không thấy mặt trong ảnh"})
-
-    # Trong bản demo: teacher chỉ enroll của chính mình
-    username = "teacher1"
-
-    conn = sqlite3.connect("attendance.db")
-    c = conn.cursor()
-
-    c.execute("UPDATE users SET face=? WHERE username=?", (embedding, username))
-    conn.commit()
-    conn.close()
-
-    return JSONResponse({"status": "ok", "msg": "Đã lưu khuôn mặt!"})
-
-
-# ============================
-# STUDENT: ATTENDANCE
-# ============================
+# ===============================
+# NHẬN DIỆN REALTIME
+# ===============================
 @app.post("/api/frame")
-async def frame(
-    file: UploadFile,
-    token: str = Form(...)
-):
-    img_bytes = await file.read()
-    embedding = extract_face_embedding(img_bytes)
+def frame(img: str = Form(...)):
+    img_np = decode_base64_to_image(img)
+    faces = face_app.get(img_np)
 
-    if embedding is None:
-        return JSONResponse({"status": "error", "msg": "Không tìm thấy mặt"})
+    if len(faces) == 0:
+        return {"status": "noface"}
 
-    conn = sqlite3.connect("attendance.db")
-    c = conn.cursor()
+    emb = faces[0].embedding
+    encs = sql("SELECT username, embedding FROM encodings")
 
-    c.execute("SELECT username, face FROM users WHERE face IS NOT NULL")
-    rows = c.fetchall()
+    best_user = None
+    best_score = -1
 
-    for username, face_data in rows:
-        if face_data and compare_face(embedding, face_data):
-            c.execute("INSERT INTO logs (username) VALUES (?)", (username,))
-            conn.commit()
-            conn.close()
-            return JSONResponse({"status": "ok", "msg": f"Điểm danh thành công: {username}"})
+    for uname, blob in encs:
+        known_emb = pickle.loads(blob)
+        score = cosine(emb, known_emb)
 
-    conn.close()
-    return JSONResponse({"status": "error", "msg": "Không khớp khuôn mặt nào"})
+        if score > best_score:
+            best_score = score
+            best_user = uname
+
+    if best_score < 0.5:
+        return {"status": "unknown", "score": best_score}
+
+    return {
+        "status": "ok",
+        "recognized": best_user,
+        "score": best_score
+    }
 
 
-# ============================
-# ROOT PAGE -> redirect to login
-# ============================
-@app.get("/")
-async def root():
-    return JSONResponse({"msg": "Server running. Open /static/index.html"})
-    
+# ===============================
+# API ĐIỂM DANH
+# ===============================
+@app.post("/api/attendance")
+def attendance(username: str = Form(...), file: UploadFile = File(...)):
+    # ======================
+    # 1. Đọc ảnh gửi lên
+    # ======================
+    img_bytes = file.file.read()
+
+    filename = f"{username}_{int(time.time())}.jpg"
+    with open(ATT_DIR / filename, "wb") as f:
+        f.write(img_bytes)
+
+    img_np = np.array(Image.open(io.BytesIO(img_bytes)).convert("RGB"))
+
+    # ======================
+    # 2. CHECK KHUÔN MẶT
+    # ======================
+    faces = face_app.get(img_np)
+
+    if len(faces) == 0:
+        return {"status": "fail", "msg": "Không phát hiện khuôn mặt"}
+
+    emb = faces[0].embedding
+    encs = sql("SELECT username, embedding FROM encodings")
+
+    best_user = None
+    best_score = -1
+
+    for uname, blob in encs:
+        known_emb = pickle.loads(blob)
+        score = cosine(emb, known_emb)
+
+        if score > best_score:
+            best_score = score
+            best_user = uname
+
+    if best_score < 0.6:
+        return {"status": "fail", "msg": "Khuôn mặt không khớp"}
+
+    if best_user != username:
+        return {"status": "fail", "msg": "Sai người điểm danh"}
+
+    # ======================
+    # 3. CHECK WATERMARK (FEATURE MATCHING)
+    # ======================
+    is_valid, wm_score = verify_watermark(img_np)
+
+    if not is_valid:
+        return {
+            "status": "fail",
+            "msg": f"Sai watermark phòng học (score={wm_score})"
+        }
+
+    # ======================
+    # 4. THÀNH CÔNG
+    # ======================
+    return {
+        "status": "success",
+        "msg": f"Điểm danh thành công cho {username}"
+    }
+
+# ===============================
+# XÓA TOÀN BỘ ENCODING
+# ===============================
+@app.get("/api/clear_encodings")
+def clear_encodings():
+    sql("DELETE FROM encodings")
+    return {"status": "ok"}
+
+
+# ===============================
+# WATERMARK (ẢNH PHÒNG)
+# ===============================
+@app.post("/api/teacher_generate_watermark")
+def generate_watermark(file: UploadFile = File(...)):
+    import cv2
+
+    img_bytes = file.file.read()
+    img = np.array(Image.open(io.BytesIO(img_bytes)).convert("RGB"))
+
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    edges = cv2.Sobel(gray, cv2.CV_64F, 1, 1, ksize=3)
+
+    h, w = gray.shape
+    wm_size = 120
+    best_score = -1
+    bx = by = 0
+
+    for y in range(0, h - wm_size, 20):
+        for x in range(0, w - wm_size, 20):
+            score = edges[y:y+wm_size, x:x+wm_size].sum()
+            if score > best_score:
+                best_score = score
+                bx, by = x, y
+
+    crop = img[by:by+wm_size, bx:bx+wm_size]
+
+    # Lưu watermark tạm
+    Image.fromarray(crop).save(WM_DIR / "temp_watermark.jpg")
+
+    # Trả về base64 để frontend hiển thị
+    buf = io.BytesIO()
+    Image.fromarray(crop).save(buf, format="JPEG")
+    b64 = base64.b64encode(buf.getvalue()).decode()
+
+    return {
+        "status": "ok",
+        "watermark": b64
+    }
+# ===============================
+# TRAIN WATERMARK (GIÁO VIÊN)
+# ===============================
+@app.post("/api/train_watermark")
+def train_watermark_api(files: list[UploadFile] = File(...)):
+    images = []
+
+    for file in files:
+        img_bytes = file.file.read()
+        img = np.array(Image.open(io.BytesIO(img_bytes)).convert("RGB"))
+        images.append(img)
+
+    try:
+        result = train_watermark(images)
+        return result
+    except Exception as e:
+        return {
+            "status": "error",
+            "msg": str(e)
+        }
